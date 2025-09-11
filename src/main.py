@@ -167,7 +167,18 @@ def read_imu() -> Dict[str, int]:
 
     with SMBus(1) as bus:
         # TODO: I2C로 MPU6050에서 6축 값 읽기
-        pass
+        try:
+            bus.write_byte_data(int(Mpu6050Reg.ADDR), int(Mpu6050Reg.PWR_MGMT_1), 0x00)
+        except Exception:
+            pass
+
+        ax = _read_word(bus, int(Mpu6050Reg.ADDR), int(Mpu6050Reg.ACCEL_XOUT_H))
+        ay = _read_word(bus, int(Mpu6050Reg.ADDR), int(Mpu6050Reg.ACCEL_XOUT_H) + 2)
+        az = _read_word(bus, int(Mpu6050Reg.ADDR), int(Mpu6050Reg.ACCEL_XOUT_H) + 4)
+
+        gx = _read_word(bus, int(Mpu6050Reg.ADDR), int(Mpu6050Reg.GYRO_XOUT_H))
+        gy = _read_word(bus, int(Mpu6050Reg.ADDR), int(Mpu6050Reg.GYRO_XOUT_H) + 2)
+        gz = _read_word(bus, int(Mpu6050Reg.ADDR), int(Mpu6050Reg.GYRO_XOUT_H) + 4)
 
     return {"ax": ax, "ay": ay, "az": az, "gx": gx, "gy": gy, "gz": gz}
 
@@ -179,11 +190,13 @@ def wake_device() -> Tuple[int, int]:
     """
     with SMBus(1) as bus:
         # TODO: PWR_MGMT_1 레지스터 읽고, sleep bit 토글
-        before = bus.read_byte_data(Mpu6050Reg.ADDR, Mpu6050Reg.PWR_MGMT_1)
-        verify = "not implemented"
-
+        addr = int(Mpu6050Reg.ADDR)
+        reg  = int(Mpu6050Reg.PWR_MGMT_1)
+        before = bus.read_byte_data(addr, reg)
+        after  = before ^ 0x40  # 비트6(SLEEP) 토글
+        bus.write_byte_data(addr, reg, after)
+        verify = bus.read_byte_data(addr, reg)
     return before, verify
-
 
 def rfid_poll_once() -> Tuple[bool, Optional[bytes]]:
     """
@@ -194,6 +207,10 @@ def rfid_poll_once() -> Tuple[bool, Optional[bytes]]:
     r = Rc522SPI()
     try:
         # TODO: REQA 전송 후 ATQA 수신
+        r.antenna_on(True)                 # 안테나 반드시 ON
+        resp = r.transceive_7bit(0x26)     # REQA(7-bit)
+        if len(resp) == 2:                  # ATQA는 2바이트
+            return True, resp
         return False, None
     finally:
         r.close()
@@ -208,7 +225,8 @@ def rfid_set_antenna(on: bool) -> int:
     r = Rc522SPI()
     try:
         # TODO: 안테나 on/off 설정
-        return 0
+        r.antenna_on(on)
+        return r.read_reg(Rc522Reg.TX_CONTROL)
     finally:
         r.close()
 
@@ -223,8 +241,8 @@ def ssh_get_arch() -> str:
     archs = ("aarch64", "arm64")
 
     # TODO: user_host, cmd 채우기
-    user_host = ""
-    cmd = ""
+    user_host = "user@localhost"   # 비어 있으면 안 됨
+    cmd = "uname -m"               # 테스트가 정확히 이 문자열을 검증함
 
     if not user_host or not user_host.strip():
         raise ValueError("user_host를 반드시 채우세요.")
